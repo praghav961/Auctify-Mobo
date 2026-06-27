@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Auction Live</title>
+  <meta name="theme-color" content="#020617">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div id="app">
+
+    <!-- HEADER -->
+    <header id="appHeader">
+      <div class="h-left">
+        <span class="h-icon">🏏</span>
+        <div>
+          <div class="h-title">AUCTION LIVE</div>
+          <div class="h-sub" id="hTournament">Loading...</div>
+        </div>
+      </div>
+      <span class="h-badge" id="hLiveBadge">● LIVE</span>
+    </header>
+
+    <!-- SCORE STRIP -->
+    <div id="scoreStrip">
+      <div class="strip-scroll">
+        <div class="strip-item"><span class="si-lbl">Teams</span><span class="si-val" id="sTeams">0</span></div>
+        <div class="strip-item"><span class="si-lbl">Players</span><span class="si-val" id="sPlayers">0</span></div>
+        <div class="strip-item"><span class="si-lbl">Per Team</span><span class="si-val" id="sPerTeam">0</span></div>
+        <div class="strip-item acc"><span class="si-lbl">Base</span><span class="si-val" id="sBase">0</span></div>
+        <div class="strip-item acc"><span class="si-lbl">Purse</span><span class="si-val" id="sPurse">0</span></div>
+        <div class="strip-item"><span class="si-lbl">Round</span><span class="si-val" id="sRound">1</span></div>
+        <div class="strip-item sold"><span class="si-lbl">Sold</span><span class="si-val" id="sSold">0</span></div>
+        <div class="strip-item unsold"><span class="si-lbl">Unsold</span><span class="si-val" id="sUnsold">0</span></div>
+        <div class="strip-item pend"><span class="si-lbl">Pending</span><span class="si-val" id="sPending">0</span></div>
+      </div>
+    </div>
+
+    <!-- SCREENS -->
+    <div id="screenContainer">
+
+      <!-- SCREEN 0: LIVE -->
+      <div class="screen active" id="screen0">
+        <div class="live-card">
+          <div class="live-card-head">
+            <span class="section-label">🎯 On The Block</span>
+            <span class="lh-badge" id="liveBadge">AWAITING</span>
+          </div>
+          <div class="live-player" id="livePlayerArea">
+            <div class="lp-placeholder">👤</div>
+            <div class="lp-name">Waiting for admin...</div>
+            <div class="lp-desc">Live player will appear here.</div>
+          </div>
+        </div>
+
+        <div class="feed-card">
+          <div class="feed-head">
+            <span class="section-label">📝 Live Feed</span>
+            <span class="count-pill" id="feedCount">0</span>
+          </div>
+          <ul class="feed-list" id="feedList">
+            <li class="feed-empty">Waiting for updates...</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- SCREEN 1: TEAMS -->
+      <div class="screen" id="screen1">
+        <div class="screen-top-bar">
+          <span class="section-label">🏆 Teams Dashboard</span>
+          <span class="count-pill" id="teamCountBadge">0</span>
+        </div>
+        <div id="teamsContainer">
+          <div class="load-msg">Loading teams...</div>
+        </div>
+      </div>
+
+      <!-- SCREEN 2: PLAYERS -->
+      <div class="screen" id="screen2">
+        <div class="screen-top-bar">
+          <span class="section-label">📋 All Players</span>
+          <span class="count-pill" id="playerCountBadge">0</span>
+        </div>
+        <div id="playersContainer">
+          <div class="load-msg">Loading players...</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- BOTTOM TAB NAV -->
+    <nav id="tabNav">
+      <button class="tab-btn active" data-tab="0">
+        <span class="tab-icon">🎯</span>
+        <span class="tab-lbl">Live</span>
+      </button>
+      <button class="tab-btn" data-tab="1">
+        <span class="tab-icon">🏆</span>
+        <span class="tab-lbl">Teams</span>
+      </button>
+      <button class="tab-btn" data-tab="2">
+        <span class="tab-icon">📋</span>
+        <span class="tab-lbl">Players</span>
+      </button>
+    </nav>
+
+  </div>
+
+  <!-- RESULT OVERLAY -->
+  <div id="resultOverlay" class="overlay">
+    <div class="overlay-card" id="overlayCard">
+      <div class="overlay-stripe" id="oStripe"></div>
+      <div class="overlay-body">
+        <div class="overlay-badge" id="oBadge">SOLD</div>
+        <div class="overlay-name" id="oName">Player</div>
+        <div class="overlay-meta" id="oMeta">Team • ₹ 0</div>
+      </div>
+    </div>
+    <div id="confettiBox"></div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
