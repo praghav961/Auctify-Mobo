@@ -6,497 +6,299 @@ import {
   onSnapshot
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
-/* ─────────────────────────────────────────────
-   FIREBASE CONFIG
-───────────────────────────────────────────── */
 const firebaseConfig = {
-  apiKey:            "AIzaSyCWvHbZghVZu9aDUO-sHroxOiN0WXZ3AgI",
-  authDomain:        "cricketauction-df77b.firebaseapp.com",
-  databaseURL:       "https://cricketauction-df77b-default-rtdb.firebaseio.com",
-  projectId:         "cricketauction-df77b",
-  storageBucket:     "cricketauction-df77b.firebasestorage.app",
+  apiKey: "AIzaSyCWvHbZghVZu9aDUO-sHroxOiN0WXZ3AgI",
+  authDomain: "cricketauction-df77b.firebaseapp.com",
+  databaseURL: "https://cricketauction-df77b-default-rtdb.firebaseio.com",
+  projectId: "cricketauction-df77b",
+  storageBucket: "cricketauction-df77b.firebasestorage.app",
   messagingSenderId: "1052181366792",
-  appId:             "1:1052181366792:web:c86af556248567e9f5e9bd",
-  measurementId:     "G-BF00NXYJJ9"
+  appId: "1:1052181366792:web:c86af556248567e9f5e9bd",
+  measurementId: "G-BF00NXYJJ9"
 };
 
-const fbApp = initializeApp(firebaseConfig);
-const db    = getFirestore(fbApp);
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
 
-/* ─────────────────────────────────────────────
-   HELPERS
-───────────────────────────────────────────── */
-const $  = id => document.getElementById(id);
-const num   = v => Number(v) || 0;
-const money = v => num(v).toLocaleString("en-IN");
-const esc   = v =>
-  String(v ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+const SETTINGS_REF = doc(db, "auction_meta", "settings");
+const teamsCol = collection(db, "teams");
+const playersCol = collection(db, "players");
 
-const ph = (text, size = 60) =>
-  `https://placehold.co/${size}x${size}/0f172a/ffffff?text=${encodeURIComponent(
-    String(text || "?").trim().charAt(0).toUpperCase()
-  )}`;
-
-/* ─────────────────────────────────────────────
-   STATE
-───────────────────────────────────────────── */
-const S = {
-  settings:      null,
-  teams:         [],
-  players:       [],
-  feed:          [],
-  prevMap:       new Map(),
-  prevLiveId:    "",
-  playersReady:  false,
-  settingsReady: false,
-  activeTab:     0
+const state = {
+  settings: null,
+  teams: [],
+  players: [],
+  feed: [],
+  prevLiveId: "",
+  prevStatusMap: new Map()
 };
 
-let overlayTimer = null;
+const $ = id => document.getElementById(id);
 
-/* ─────────────────────────────────────────────
-   TAB SWITCHING (with smooth animation)
-───────────────────────────────────────────── */
-function switchTab(next) {
-  if (next === S.activeTab) return;
-
-  const prev   = S.activeTab;
-  const goRight = next > prev;
-
-  const prevScreen = $(`screen${prev}`);
-  const nextScreen = $(`screen${next}`);
-
-  // Slide out current
-  prevScreen.classList.remove("active");
-  prevScreen.classList.add(goRight ? "slide-left" : "");
-  if (!goRight) {
-    prevScreen.style.transform = "translateX(40px)";
-    prevScreen.style.opacity   = "0";
-  }
-
-  // Prepare next (off-screen in the right direction)
-  nextScreen.style.transition = "none";
-  nextScreen.style.transform  = `translateX(${goRight ? "40px" : "-40px"})`;
-  nextScreen.style.opacity    = "0";
-  nextScreen.style.visibility = "visible";
-
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      nextScreen.style.transition = "";
-      nextScreen.style.transform  = "translateX(0)";
-      nextScreen.style.opacity    = "1";
-      nextScreen.classList.add("active");
-
-      // Reset prev
-      setTimeout(() => {
-        prevScreen.classList.remove("slide-left");
-        prevScreen.style.transform  = "";
-        prevScreen.style.opacity    = "";
-        prevScreen.style.visibility = "";
-      }, 320);
-    });
-  });
-
-  // Update tab buttons
-  document.querySelectorAll(".tab-btn").forEach((btn, i) => {
-    btn.classList.toggle("active", i === next);
-  });
-
-  S.activeTab = next;
+function money(value) {
+  return Number(value || 0).toLocaleString("en-IN");
 }
 
-/* ─────────────────────────────────────────────
-   TEAM STATS
-───────────────────────────────────────────── */
-function calcStats(team) {
-  const s         = S.settings || {};
-  const basePrice = num(s.basePrice);
-  const teamPurse = num(s.teamPurse);
-  const maxSlots  = num(s.playersPerTeam);
-
-  const bought = S.players
-    .filter(p => p.status === "Sold" && p.soldToTeamId === team.id)
-    .sort((a, b) => num(b.soldPrice) - num(a.soldPrice));
-
-  const spent      = bought.reduce((t, p) => t + num(p.soldPrice), 0);
-  const purseLeft  = Math.max(0, teamPurse - spent);
-  const filled     = bought.length;
-  const slotsLeft  = Math.max(0, maxSlots - filled);
-  const reserve    = Math.max(0, slotsLeft - 1) * basePrice;
-  const maxBid     = Math.max(0, purseLeft - reserve);
-
-  return { bought, spent, purseLeft, filled, slotsLeft, maxBid };
+function placeholder(text = "?") {
+  return `https://placehold.co/120x120/0f172a/ffffff?text=${encodeURIComponent(text || "?")}`;
 }
 
-/* ─────────────────────────────────────────────
-   FEED
-───────────────────────────────────────────── */
-function addFeed(html) {
-  S.feed.unshift(html);
-  if (S.feed.length > 30) S.feed.length = 30;
+function getTeamStats(team) {
+  const s = state.settings || {};
+  const bought = state.players.filter(p => p.status === "Sold" && p.soldToTeamId === team.id);
+  const spent = bought.reduce((sum, p) => sum + Number(p.soldPrice || 0), 0);
+  const purse = Number(s.teamPurse || team.purse || 0);
+  const perTeam = Number(s.playersPerTeam || 0);
+  const base = Number(s.basePrice || 0);
+  const slotsFilled = bought.length;
+  const slotsLeft = Math.max(0, perTeam - slotsFilled);
+  const purseLeft = Math.max(0, purse - spent);
+  const reserve = Math.max(0, slotsLeft - 1) * base;
+  const maxBid = Math.max(0, purseLeft - reserve);
+
+  return { bought, spent, purseLeft, slotsFilled, slotsLeft, maxBid };
+}
+
+function pushFeed(text) {
+  state.feed.unshift({ text, time: new Date() });
+  state.feed = state.feed.slice(0, 30);
   renderFeed();
 }
 
-function renderFeed() {
-  const ul = $("feedList");
-  $("feedCount").textContent = S.feed.length;
-  if (!S.feed.length) {
-    ul.innerHTML = `<li class="feed-empty">Waiting for updates...</li>`;
-    return;
-  }
-  ul.innerHTML = S.feed.map(item => `<li>${item}</li>`).join("");
-}
-
-/* ─────────────────────────────────────────────
-   SCORE STRIP
-───────────────────────────────────────────── */
 function renderSummary() {
-  const s = S.settings;
-  if (!s) {
-    $("hTournament").textContent = "Not connected";
-    $("hLiveBadge").textContent  = "● OFFLINE";
-    return;
-  }
-  const sold    = S.players.filter(p => p.status === "Sold").length;
-  const unsold  = S.players.filter(p => p.status === "Unsold").length;
-  const pending = S.players.filter(p => p.status === "Pending").length;
+  const s = state.settings || {};
+  const sold = state.players.filter(p => p.status === "Sold").length;
+  const unsold = state.players.filter(p => p.status === "Unsold").length;
+  const pending = state.players.filter(p => !p.status || p.status === "Pending").length;
 
-  $("hTournament").textContent  = s.tournamentName || "My Tournament";
-  $("hLiveBadge").textContent   = s.auctionEnded ? "● ENDED" : "● LIVE";
-  $("sTeams").textContent       = num(s.numTeams);
-  $("sPlayers").textContent     = num(s.numPlayers) || S.players.length;
-  $("sPerTeam").textContent     = num(s.playersPerTeam);
-  $("sBase").textContent        = money(s.basePrice);
-  $("sPurse").textContent       = money(s.teamPurse);
-  $("sRound").textContent       = num(s.currentRound || 1);
-  $("sSold").textContent        = sold;
-  $("sUnsold").textContent      = unsold;
-  $("sPending").textContent     = pending;
-  document.title                = `${s.tournamentName || "Auction"} — Live`;
+  $("headerTournament").textContent = s.tournamentName || "Auction";
+  $("sTeams").textContent = s.numTeams || state.teams.length || 0;
+  $("sPlayers").textContent = s.numPlayers || state.players.length || 0;
+  $("sBase").textContent = money(s.basePrice);
+  $("sPurse").textContent = money(s.teamPurse);
+  $("sRound").textContent = s.currentRound || 1;
+  $("sSold").textContent = sold;
+  $("sUnsold").textContent = unsold;
+  $("sPending").textContent = pending;
+
+  if (s.auctionEnded) {
+    $("liveBadge").textContent = "● COMPLETE";
+    $("liveBadge").className = "live-badge complete";
+  } else {
+    $("liveBadge").textContent = "● LIVE";
+    $("liveBadge").className = "live-badge online";
+  }
 }
 
-/* ─────────────────────────────────────────────
-   SCREEN 0: LIVE PLAYER
-───────────────────────────────────────────── */
-function renderLivePlayer() {
-  const area   = $("livePlayerArea");
-  const badge  = $("liveBadge");
-  const liveId = S.settings?.livePlayerId || "";
-  const player = liveId ? S.players.find(p => p.id === liveId) : null;
+function renderCurrentPlayer() {
+  const liveId = state.settings?.livePlayerId || "";
+  const player = state.players.find(p => p.id === liveId);
+  const wrap = $("currentPlayerArea");
 
   if (!player) {
-    const pending = S.players.filter(p => p.status === "Pending").length;
-    badge.textContent = S.settings?.auctionEnded ? "ENDED" : "AWAITING";
-    area.innerHTML = `
-      <div class="lp-placeholder">👤</div>
-      <div class="lp-name">No Player Loaded</div>
-      <div class="lp-desc">${pending ? `${pending} player(s) pending` : "Waiting for admin to load next player."}</div>
+    wrap.innerHTML = `
+      <div class="placeholder">👤</div>
+      <h3>No Player Loaded</h3>
+      <p>${state.settings?.auctionEnded ? "Auction complete." : "Waiting for admin..."}</p>
     `;
+    $("currentBadge").textContent = state.settings?.auctionEnded ? "Complete" : "Awaiting";
     return;
   }
 
-  const isReauction = num(player.reauctionCount) > 0;
-  badge.textContent  = isReauction ? "RE-AUCTION" : "BIDDING LIVE";
-
-  const imgSrc = player.imageUrl || ph(player.name, 150);
-  const base   = player.basePrice || S.settings?.basePrice || 0;
-
-  area.innerHTML = `
-    <img
-      class="lp-img"
-      src="${esc(imgSrc)}"
-      alt="${esc(player.name)}"
-      onerror="this.src='${ph(player.name, 150)}'">
-    <div class="lp-name">${esc(player.name || "Player")}</div>
-    <div class="lp-tags">
-      ${player.batting  ? `<span class="lp-tag">🏏 ${esc(player.batting)}</span>` : ""}
-      ${player.bowling  ? `<span class="lp-tag">🎯 ${esc(player.bowling)}</span>` : ""}
-      ${player.role     ? `<span class="lp-tag">⭐ ${esc(player.role)}</span>`    : ""}
-      <span class="lp-tag">Round ${num(player.auctionRound || 1)}</span>
-      ${isReauction ? `<span class="lp-tag">♻️ Re-auction</span>` : ""}
+  wrap.innerHTML = `
+    <img class="player-img" src="${player.imageUrl || placeholder(player.name?.[0])}" alt="${player.name}">
+    <div class="base-price">Base Price: ${money(player.basePrice || state.settings?.basePrice)}</div>
+    <h3>${player.name}</h3>
+    <div class="tags">
+      <span>${player.role || "Player"}</span>
+      <span>${player.batting || "Batting -"}</span>
+      <span>${player.bowling || "Bowling -"}</span>
+      <span>Round ${player.auctionRound || state.settings?.currentRound || 1}</span>
     </div>
-    <div class="lp-price">Base Price: ₹ ${money(base)}</div>
   `;
+
+  $("currentBadge").textContent = Number(player.reauctionCount || 0) > 0 ? "Re-Auction" : "Live";
 }
 
-/* ─────────────────────────────────────────────
-   SCREEN 1: TEAMS
-───────────────────────────────────────────── */
 function renderTeams() {
-  const wrap = $("teamsContainer");
-  $("teamCountBadge").textContent = S.teams.length;
+  const wrap = $("teamsDashboard");
+  $("teamCountBadge").textContent = state.teams.length;
 
-  if (!S.teams.length) {
-    wrap.innerHTML = `<div class="load-msg">No teams found.</div>`;
+  if (!state.teams.length) {
+    wrap.innerHTML = `<p class="empty">No teams found.</p>`;
     return;
   }
 
-  wrap.innerHTML = S.teams.map(team => {
-    const st = calcStats(team);
-
-    const logoSrc = team.logoUrl || ph(team.name, 80);
-
-    const rosterHtml = st.bought.length
-      ? st.bought.map(p => {
-          const imgSrc = p.imageUrl || ph(p.name, 40);
-          return `
-            <div class="mini-p">
-              <img src="${esc(imgSrc)}" alt="${esc(p.name)}" onerror="this.src='${ph(p.name, 40)}'">
-              <div>
-                <div class="mini-p-name">${esc(p.name || "Player")}</div>
-                <div class="mini-p-role">${esc(p.role || "")}</div>
-              </div>
-              <div class="mini-p-price">₹${money(p.soldPrice)}</div>
-            </div>
-          `;
-        }).join("")
-      : `<div class="empty-roster">No players bought yet</div>`;
+  wrap.innerHTML = state.teams.map(team => {
+    const stats = getTeamStats(team);
+    const logo = team.logoUrl || placeholder(team.name?.[0] || "T");
+    const roster = stats.bought.length
+      ? stats.bought.map(p => `
+          <div class="mini-player">
+            <img src="${p.imageUrl || placeholder(p.name?.[0])}" alt="${p.name}">
+            <span>${p.name}</span>
+            <b>${money(p.soldPrice)}</b>
+          </div>
+        `).join("")
+      : `<p class="empty small">No players yet</p>`;
 
     return `
-      <div class="team-card">
-        <div class="team-card-head">
-          <img class="team-logo" src="${esc(logoSrc)}" alt="${esc(team.name)}" onerror="this.src='${ph(team.name, 80)}'">
+      <article class="team-card">
+        <div class="team-head">
+          <img src="${logo}" alt="${team.name}">
           <div>
-            <div class="team-name">${esc(team.name || "Team")}</div>
-            <div class="team-sub">Owner: ${esc(team.ownerName || "—")}</div>
+            <h3>${team.name || "Team"}</h3>
+            <p>${stats.slotsFilled}/${state.settings?.playersPerTeam || 0} players</p>
           </div>
         </div>
-        <div class="team-metrics">
-          <div class="tm-box green">
-            <span class="v">₹${money(st.purseLeft)}</span>
-            <span class="l">Purse Left</span>
-          </div>
-          <div class="tm-box blue">
-            <span class="v">${st.filled}</span>
-            <span class="l">Bought</span>
-          </div>
-          <div class="tm-box purple">
-            <span class="v">${st.slotsLeft}</span>
-            <span class="l">Slots Left</span>
-          </div>
-          <div class="tm-box gold">
-            <span class="v">₹${money(st.maxBid)}</span>
-            <span class="l">Max Bid</span>
-          </div>
+
+        <div class="metric-grid">
+          <div><span>Purse Left</span><b>${money(stats.purseLeft)}</b></div>
+          <div><span>Max Bid</span><b>${money(stats.maxBid)}</b></div>
+          <div><span>Spent</span><b>${money(stats.spent)}</b></div>
+          <div><span>Slots Left</span><b>${stats.slotsLeft}</b></div>
         </div>
-        <div class="roster-label">SQUAD (${st.filled})</div>
-        <div class="team-roster">${rosterHtml}</div>
-      </div>
+
+        <div class="roster">${roster}</div>
+      </article>
     `;
   }).join("");
 }
 
-/* ─────────────────────────────────────────────
-   SCREEN 2: PLAYERS (strict auction order)
-───────────────────────────────────────────── */
-function renderPlayers() {
-  const wrap = $("playersContainer");
-  $("playerCountBadge").textContent = S.players.length;
+function statusClass(status) {
+  if (status === "Sold") return "sold";
+  if (status === "Unsold") return "unsold";
+  return "pending";
+}
 
-  if (!S.players.length) {
-    wrap.innerHTML = `<div class="load-msg">No players found.</div>`;
+function renderPlayers() {
+  const wrap = $("playersList");
+  $("playerTableBadge").textContent = state.players.length;
+
+  if (!state.players.length) {
+    wrap.innerHTML = `<p class="empty">No players found.</p>`;
     return;
   }
 
-  /*
-   * Sort STRICTLY by auctionOrder (the order set while recording players).
-   * Players with no order fall to the end.
-   */
-  const sorted = [...S.players].sort((a, b) => {
-    const ao = num(a.auctionOrder);
-    const bo = num(b.auctionOrder);
-    if (ao === 0 && bo === 0) return 0;
-    if (ao === 0) return 1;
-    if (bo === 0) return -1;
-    return ao - bo;
+  const sorted = [...state.players].sort((a, b) => Number(a.auctionOrder || 0) - Number(b.auctionOrder || 0));
+
+  wrap.innerHTML = sorted.map((p, i) => `
+    <article class="player-row">
+      <span class="idx">${i + 1}</span>
+      <img src="${p.imageUrl || placeholder(p.name?.[0])}" alt="${p.name}">
+      <div class="p-info">
+        <h3>${p.name || "Player"}</h3>
+        <p>${p.role || "-"} • ${p.batting || "-"} • ${p.bowling || "-"}</p>
+      </div>
+      <div class="p-side">
+        <span class="status ${statusClass(p.status)}">${p.status || "Pending"}</span>
+        <b>${p.soldToTeamName || "—"}</b>
+        <small>${p.soldPrice ? money(p.soldPrice) : `Round ${p.auctionRound || 1}`}</small>
+      </div>
+    </article>
+  `).join("");
+}
+
+function renderFeed() {
+  const list = $("feedList");
+  $("feedCountBadge").textContent = state.feed.length;
+
+  if (!state.feed.length) {
+    list.innerHTML = `<li>Waiting for updates...</li>`;
+    return;
+  }
+
+  list.innerHTML = state.feed.map(item => `
+    <li>
+      <span>${item.text}</span>
+      <small>${item.time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</small>
+    </li>
+  `).join("");
+}
+
+function showSoldOverlay(player) {
+  $("oName").textContent = player.name || "Player";
+  $("oMeta").textContent = `${player.soldToTeamName || "Team"} • ${money(player.soldPrice)}`;
+  $("resultOverlay").classList.add("show");
+  setTimeout(() => $("resultOverlay").classList.remove("show"), 2600);
+}
+
+function detectPlayerChanges(players) {
+  players.forEach(player => {
+    const oldStatus = state.prevStatusMap.get(player.id);
+    const newStatus = player.status || "Pending";
+
+    if (newStatus === "Sold" && oldStatus !== "Sold") {
+      pushFeed(`✅ ${player.name} sold to ${player.soldToTeamName} for ${money(player.soldPrice)}`);
+      showSoldOverlay(player);
+    }
+
+    if (newStatus === "Unsold" && oldStatus !== "Unsold") {
+      pushFeed(`❌ ${player.name} marked unsold`);
+    }
   });
 
-  wrap.innerHTML = sorted.map((p, idx) => {
-    const status   = p.status || "Pending";
-    const chipCls  = status === "Sold" ? "sold" : status === "Unsold" ? "unsold" : "pending";
-    const imgSrc   = p.imageUrl || ph(p.name, 50);
-    const priceVal = status === "Sold" ? `₹${money(p.soldPrice)}` : "—";
-    const priceCls = status === "Sold" ? "" : "dim";
-    const subText  = [p.role, p.batting, p.bowling].filter(Boolean).join(" • ");
-
-    return `
-      <div class="player-row">
-        <div class="pr-idx">${idx + 1}</div>
-        <img class="pr-img" src="${esc(imgSrc)}" alt="${esc(p.name)}" onerror="this.src='${ph(p.name, 50)}'">
-        <div class="pr-info">
-          <div class="pr-name">${esc(p.name || "Player")}</div>
-          <div class="pr-sub">${esc(subText || `Round ${num(p.auctionRound || 1)}`)}</div>
-        </div>
-        <div class="pr-right">
-          <span class="pr-chip ${chipCls}">${esc(status)}</span>
-          <span class="pr-price ${priceCls}">${priceVal}</span>
-        </div>
-      </div>
-    `;
-  }).join("");
+  state.prevStatusMap = new Map(players.map(p => [p.id, p.status || "Pending"]));
 }
 
-/* ─────────────────────────────────────────────
-   CONFETTI
-───────────────────────────────────────────── */
-const CF_COLORS = [
-  "#22c55e","#16a34a","#fbbf24","#f97316",
-  "#86efac","#4ade80","#fde68a","#ffffff","#38bdf8"
-];
-
-function launchConfetti() {
-  const box = $("confettiBox");
-  box.innerHTML = "";
-  for (let i = 0; i < 55; i++) {
-    const el = document.createElement("div");
-    el.className = "cf";
-    el.style.cssText = `
-      left: ${Math.random() * 100}%;
-      background: ${CF_COLORS[Math.floor(Math.random() * CF_COLORS.length)]};
-      width: ${5 + Math.random() * 6}px;
-      height: ${9 + Math.random() * 8}px;
-      border-radius: ${Math.random() > 0.5 ? "50%" : "2px"};
-      animation-duration: ${2.0 + Math.random() * 1.8}s;
-      animation-delay: ${Math.random() * 0.5}s;
-    `;
-    box.appendChild(el);
-  }
-  setTimeout(() => { box.innerHTML = ""; }, 4500);
-}
-
-/* ─────────────────────────────────────────────
-   RESULT OVERLAY
-───────────────────────────────────────────── */
-function showOverlay(type, player) {
-  clearTimeout(overlayTimer);
-
-  const overlay = $("resultOverlay");
-  overlay.classList.remove("show", "sold", "unsold");
-
-  $("oBadge").textContent = type === "Sold" ? "✅  SOLD" : "❌  UNSOLD";
-  $("oName").textContent  = player.name || "Player";
-  $("oMeta").textContent  = type === "Sold"
-    ? `${player.soldToTeamName || "Team"}  •  ₹ ${money(player.soldPrice)}`
-    : "No winning bid";
-
-  overlay.classList.add(type === "Sold" ? "sold" : "unsold");
-
-  if (type === "Sold") launchConfetti();
-  else $("confettiBox").innerHTML = "";
-
-  void overlay.offsetWidth; // force reflow
-  overlay.classList.add("show");
-
-  overlayTimer = setTimeout(() => {
-    overlay.classList.remove("show");
-  }, 3200);
-}
-
-/* ─────────────────────────────────────────────
-   SETTINGS HANDLER
-───────────────────────────────────────────── */
-function onSettings(data) {
-  const prevLiveId = S.prevLiveId;
-  const nextLiveId = data?.livePlayerId || "";
-
-  S.settings = data;
-
+function renderAll() {
   renderSummary();
-  renderLivePlayer();
-  renderTeams();
-
-  if (S.settingsReady && nextLiveId && nextLiveId !== prevLiveId) {
-    const p = S.players.find(pl => pl.id === nextLiveId);
-    if (p) addFeed(`🎯 Now on block: <strong>${esc(p.name)}</strong>`);
-  }
-
-  S.prevLiveId    = nextLiveId;
-  S.settingsReady = true;
-}
-
-/* ─────────────────────────────────────────────
-   PLAYERS HANDLER
-───────────────────────────────────────────── */
-function onPlayers(list) {
-  if (S.playersReady) {
-    for (const p of list) {
-      const prev = S.prevMap.get(p.id);
-      if (!prev) continue;
-
-      if (prev.status !== p.status) {
-        if (p.status === "Sold") {
-          addFeed(`✅ <strong>${esc(p.name)}</strong> → <strong>${esc(p.soldToTeamName || "Team")}</strong> for ₹${money(p.soldPrice)}`);
-          showOverlay("Sold", p);
-        } else if (p.status === "Unsold") {
-          addFeed(`❌ <strong>${esc(p.name)}</strong> went unsold`);
-          showOverlay("Unsold", p);
-        } else if (p.status === "Pending" && prev.status === "Unsold") {
-          addFeed(`♻️ <strong>${esc(p.name)}</strong> moved to re-auction`);
-        }
-      }
-
-      if (num(p.auctionRound) > num(prev.auctionRound)) {
-        addFeed(`🔄 <strong>${esc(p.name)}</strong> → Round ${num(p.auctionRound)}`);
-      }
-    }
-  }
-
-  S.players      = list;
-  S.prevMap      = new Map(list.map(p => [p.id, { ...p }]));
-  S.playersReady = true;
-
-  renderSummary();
-  renderLivePlayer();
+  renderCurrentPlayer();
   renderTeams();
   renderPlayers();
+  renderFeed();
 }
 
-/* ─────────────────────────────────────────────
-   TEAMS HANDLER
-───────────────────────────────────────────── */
-function onTeams(list) {
-  S.teams = list;
-  renderTeams();
-}
+const screenOrder = ["screenLive", "screenTeams", "screenPlayers"];
+let activeScreenIndex = 0;
 
-/* ─────────────────────────────────────────────
-   TABS — EVENT LISTENERS
-───────────────────────────────────────────── */
-document.querySelectorAll(".tab-btn").forEach(btn => {
-  btn.addEventListener("click", () => {
-    switchTab(Number(btn.dataset.tab));
+function switchScreen(id) {
+  const nextIndex = screenOrder.indexOf(id);
+  if (nextIndex === -1 || nextIndex === activeScreenIndex) return;
+
+  document.querySelectorAll(".screen").forEach((screen, index) => {
+    screen.classList.remove("active", "left", "right");
+
+    if (index < nextIndex) screen.classList.add("left");
+    if (index > nextIndex) screen.classList.add("right");
   });
+
+  const nextScreen = document.getElementById(id);
+  nextScreen.classList.remove("left", "right");
+  nextScreen.classList.add("active");
+
+  document.querySelectorAll(".tab").forEach(tab => {
+    tab.classList.toggle("active", tab.dataset.screen === id);
+  });
+
+  activeScreenIndex = nextIndex;
+}
+
+document.querySelectorAll(".tab").forEach(tab => {
+  tab.addEventListener("click", () => switchScreen(tab.dataset.screen));
 });
 
-/* ─────────────────────────────────────────────
-   BOOT — FIRESTORE LISTENERS
-───────────────────────────────────────────── */
-function boot() {
-  // Settings
-  onSnapshot(
-    doc(db, "auction_meta", "settings"),
-    snap => onSettings(snap.exists() ? snap.data() : null),
-    err  => console.error("Settings:", err)
-  );
+onSnapshot(SETTINGS_REF, snap => {
+  state.settings = snap.exists() ? snap.data() : null;
 
-  // Teams
-  onSnapshot(
-    collection(db, "teams"),
-    snap => onTeams(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
-    err  => console.error("Teams:", err)
-  );
+  const liveId = state.settings?.livePlayerId || "";
+  if (liveId && liveId !== state.prevLiveId) {
+    const player = state.players.find(p => p.id === liveId);
+    if (player) pushFeed(`🎯 Now on the block: ${player.name}`);
+  }
 
-  // Players
-  onSnapshot(
-    collection(db, "players"),
-    snap => onPlayers(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
-    err  => console.error("Players:", err)
-  );
-}
+  state.prevLiveId = liveId;
+  renderAll();
+});
 
-boot();
+onSnapshot(teamsCol, snap => {
+  state.teams = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  renderAll();
+});
+
+onSnapshot(playersCol, snap => {
+  const players = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  detectPlayerChanges(players);
+  state.players = players;
+  renderAll();
+});
