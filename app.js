@@ -180,7 +180,9 @@ function renderPlayers() {
     return;
   }
 
-  const sorted = [...state.players].sort((a, b) => Number(a.auctionOrder || 0) - Number(b.auctionOrder || 0));
+ const sorted = [...state.players].sort((a, b) =>
+  (a.name || "Player").localeCompare(b.name || "Player", "en", { sensitivity: "base" })
+);
 
   wrap.innerHTML = sorted.map((p, i) => `
     <article class="player-row">
@@ -217,10 +219,24 @@ function renderFeed() {
 }
 
 function showSoldOverlay(player) {
+  const overlay = $("resultOverlay");
+
+  overlay.querySelector(".confetti-wrap")?.remove();
+
+  const confetti = document.createElement("div");
+  confetti.className = "confetti-wrap";
+  confetti.innerHTML = Array.from({ length: 36 }, (_, i) =>
+    `<span style="--i:${i}; --delay:${(i % 9) * 0.045}s; --x:${(i % 2 ? 1 : -1) * (22 + (i % 6) * 13)}px; --rot:${(i * 47) % 360}deg;"></span>`
+  ).join("");
+
   $("oName").textContent = player.name || "Player";
   $("oMeta").textContent = `${player.soldToTeamName || "Team"} • ${money(player.soldPrice)}`;
-  $("resultOverlay").classList.add("show");
-  setTimeout(() => $("resultOverlay").classList.remove("show"), 2600);
+
+  overlay.prepend(confetti);
+  overlay.classList.add("show");
+
+  setTimeout(() => overlay.classList.remove("show"), 2600);
+  setTimeout(() => confetti.remove(), 3000);
 }
 
 function detectPlayerChanges(players) {

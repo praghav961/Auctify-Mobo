@@ -693,4 +693,64 @@ body {
 ::-webkit-scrollbar-thumb {
   background: #334155;
   border-radius: 10px;
+}.confetti-wrap {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.confetti-wrap span {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 8px;
+  height: 14px;
+  border-radius: 2px;
+  background: hsl(calc(var(--i) * 38), 90%, 58%);
+  opacity: 0;
+  transform: translate(-50%, -50%) rotate(var(--rot));
+  animation: confettiWrap 1.35s ease-out var(--delay) forwards;
+}
+
+.overlay-card {
+  position: relative;
+  z-index: 1;
+  animation: soldWrapPop 0.58s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+}
+
+@keyframes confettiWrap {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.4) rotate(var(--rot));
+  }
+
+  18% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    transform:
+      translate(
+        calc(-50% + var(--x)),
+        -210px
+      )
+      rotate(calc(var(--rot) + 420deg));
+  }
+}
+
+@keyframes soldWrapPop {
+  0% {
+    transform: scale(0.82) rotate(-3deg);
+  }
+
+  60% {
+    transform: scale(1.06) rotate(2deg);
+  }
+
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
 }
